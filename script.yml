@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Basic template that defines a single Amazon EC2 instance with a security group
+  that allows SSH traffic on port 22 and HTTP traffic on port 80 on Linux
+  Virtual Machine.
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: "AWS::EC2::KeyPair::KeyName"
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.medium
+    AllowedValues:
+      - t2.micro
+      - t2.medium
+    ConstraintDescription: must be a valid EC2 instance type.
+  SecurityGroupID:
+    Description: The Id of the security group
+    Type: String
+    Default: "sg-0c37517e3be3ded39"
+  LatestAmiId:
+    Type: String
+    Default: "ami-0b2e47f3b2e23d235"
+Resources:
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !Ref SecurityGroupID
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestAmiId
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sda1"
+          Ebs:
+            VolumeSize: "20"
+      IamInstanceProfile: "S3FullAccessEC2"
+      UserData:
+        Fn::Base64: !Sub
+        - |
+          #!/bin/bash -ex
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          # Sleep for the instance role might not be properly attached
+          sleep 10
+          # Install httpd2 for testing 
+          rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+          rpm -Uvh http://rpms.famillecollet.com/enterprise/remi-release-7.rpm
+          sudo yum --enablerepo=remi,remi-php71 install httpd php php-common -y
+          sudo systemctl start httpd.service
+          sudo systemctl enable httpd.service
+          sudo yum update -y --nobest --skip-broken
+          sudo yum install redis -y
+          sudo yum install awscli -y
+          sudo aws s3 cp s3://cf-templates-1hbl02sxb4n4d-us-east-2/redis.conf /etc/redis.conf
+          sudo systemctl start redis.service
+          sudo systemctl enable redis.service
+        - {
+          }    
+
+Outputs:
+  InstanceId:
+    Description: InstanceId of the newly created EC2 instance
+    Value: !Ref EC2Instance
+  AZ:
+    Description: Availability Zone of the newly created EC2 instance
+    Value: !GetAtt
+      - EC2Instance
+      - AvailabilityZone
+  PublicDNS:
+    Description: Public DNSName of the newly created EC2 instance
+    Value: !GetAtt
+      - EC2Instance
+      - PublicDnsName
+  PublicIp:
+    Description: EC2Instance Public IP
+    Value: !GetAtt EC2Instance.PublicIp
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicIp"
